@@ -2,75 +2,96 @@ import requests
 import urllib.parse
 import yaml
 from xml.etree import ElementTree as ET
-
-def build_yandex_xml_url(
-    folder_id: str,
-    api_key: str,
-    query: str,
-    region: int = 213,
-    lang: str = 'ru',
-    sortby: str = 'rlv',
-    filter_type: str = 'strict',
-    maxpassages: int = 3,
-    groupby: str = 'attr=d.mode=deep.groups-on-page=5.docs-in-group=3',
-    page: int = 0
-) -> tuple[str, dict]:
-    base_url = 'https://yandex.ru/search/xml'
-    params = {
-        'folderid': folder_id,
-        'apikey': api_key,
-        'query': query,
-        'lr': region,
-        'l10n': lang,
-        'sortby': sortby,
-        'filter': filter_type,
-        'maxpassages': maxpassages,
-        'groupby': groupby,
-        'page': page,
-    }
-    return base_url, params
+from abc import ABC, abstractmethod
 
 
+class SearchEngine(ABC):
+    @abstractmethod
+    def build_url(self, query: str, **kwargs) -> tuple[str, dict]:
+        pass
 
-def search_web(query, num_results=5) -> list[dict] | None:
-    """
-    Функция для выполнения веб-поиска с использованием Yandex XML API.
-    Возвращает список словарей с результатами поиска.
-    Каждый словарь содержит URL, домен и расширенный текст.
-    
-    :param query: Запрос для поиска
-    :param num_results: Количество результатов для возврата
-    :return: Список словарей с результатами поиска
-    """
-    with open("api_key.yaml", "r") as f:
-        config = yaml.safe_load(f)
+    @abstractmethod
+    def parse_response(self, response_text: str) -> list[dict]:
+        pass
 
-    API_KEY = config["secret"]
-    FOLDER_ID = config["folder_id"]
+    def search(self, query: str, **kwargs) -> list[dict]:
+        base_url, params = self.build_url(query, **kwargs)
+        response = requests.get(base_url, params=params)
+        if response.status_code != 200:
+            raise Exception(f"Ошибка при выполнении запроса: {response.status_code}")
 
-    url, params = build_yandex_xml_url(
-        folder_id=FOLDER_ID,
-        api_key=API_KEY,
-        query=query,
-        region=11316,
-    )
+        return self.parse_response(response)
 
-    # Отправляем GET-запрос
-    response = requests.get(url, params=params)
-    
-    if response.status_code != 200:
-        raise Exception(f"Ошибка при выполнении запроса: {response.status_code}")
-    
-    
-    root = ET.fromstring(response.text)
-    results = []
-    
-    for group in root.findall(".//group"):
-        for doc in group.findall("doc"):
-            url = doc.findtext("url")
-            domain = doc.findtext("domain")
-            extended_text = doc.find("properties").findtext("extended-text")
-            
+
+class YandexSearch(SearchEngine):
+    def __init__(self, api_key: str, folder_id: str, region: int = 213):
+        self.api_key = api_key
+        self.folder_id = folder_id
+        self.region = region
+
+    def build_url(self, query: str, **kwargs) -> tuple[str, dict]:
+        base_url = 'https://yandex.ru/search/xml'
+        params = {
+            'folderid': self.folder_id,
+            'apikey': self.api_key,
+            'query': query,
+            'lr': kwargs.get("region", self.region),
+            'l10n': kwargs.get("lang", 'ru'),
+            'sortby': kwargs.get("sortby", 'rlv'),
+            'filter': kwargs.get("filter_type", 'strict'),
+            'maxpassages': kwargs.get("maxpassages", 3),
+            'groupby': kwargs.get("groupby", 'attr=d.mode=deep.groups-on-page=5.docs-in-group=3'),
+            'page': kwargs.get("page", 0)
+        }
+        return base_url, params
+
+    def parse_response(self, response) -> list[dict]:
+        root = ET.fromstring(response.text)
+        results = []
+
+        for group in root.findall(".//group"):
+            for doc in group.findall("doc"):
+                url = doc.findtext("url")
+                domain = doc.findtext("domain")
+                extended_text = doc.find("properties").findtext("extended-text")
+
+                if extended_text:
+                    extended_text = extended_text.strip()
+
+                results.append({
+                    "url": url,
+                    "domain": domain,
+                    "extended_text": extended_text
+                })
+
+        return results
+
+
+class GoogleSearch(SearchEngine):
+    def __init__(self, api_key: str, cse_id: str):
+        self.api_key = api_key
+        self.cse_id = cse_id
+
+    def build_url(self, query: str, **kwargs) -> tuple[str, dict]:
+        base_url = 'https://www.googleapis.com/customsearch/v1'
+        params = {
+            'key': self.api_key,
+            'cx': self.cse_id,
+            'q': query,
+            'num': kwargs.get("num_results", 10),
+            'start': kwargs.get("start", 1)
+        }
+        return base_url, params
+
+    def parse_response(self, response: str) -> list[dict]:
+        response_json = response.json()
+        results = []
+
+        for item in response_json.get("items", []):
+            url = item.get("link")
+            domain = urllib.parse.urlparse(url).netloc
+            extended_text = item.get("snippet")
+
             if extended_text:
                 extended_text = extended_text.strip()
 
@@ -79,6 +100,49 @@ def search_web(query, num_results=5) -> list[dict] | None:
                 "domain": domain,
                 "extended_text": extended_text
             })
-    
-    return results[:num_results]
 
+        return results
+
+
+class WebSearcher:
+    def __init__(self, engine: SearchEngine):
+        self.engine = engine
+
+    def search(self, query: str, num_results: int = 5) -> list[dict] | None:
+        results = self.engine.search(query)
+        return results[:num_results] if results else None
+
+
+def load_yandex_config(path="api_key.yaml"):
+    with open(path, "r") as f:
+        config = yaml.safe_load(f)
+    return config["folder_id"], config["secret"]
+
+
+def load_google_config(path="api_key_google.yaml"):
+    with open(path, "r") as f:
+        config = yaml.safe_load(f)
+    return config["cse_id"], config["secret"]
+
+
+# Пример использования:
+if __name__ == "__main__":
+    cse, api_key_google = load_google_config()
+    folder_id, api_key_yandex = load_yandex_config()
+    
+    google_engine = GoogleSearch(api_key=api_key_google, cse_id=cse)
+    yandex_engine = YandexSearch(api_key=api_key_yandex, folder_id=folder_id)
+    
+    searcher_google = WebSearcher(google_engine)
+    searcher_yandex = WebSearcher(yandex_engine)
+    
+    
+    print("Google Search Results:")
+    results = searcher_google.search("искусственный интеллект", num_results=3)
+    for r in results:
+        print(r)
+
+    print("\nYandex Search Results:")
+    results = searcher_yandex.search("искусственный интеллект", num_results=3)
+    for r in results:
+        print(r)
