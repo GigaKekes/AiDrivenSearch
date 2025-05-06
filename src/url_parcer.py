@@ -1,7 +1,16 @@
+import time
+import requests
+
 from urllib.parse import urlparse, parse_qs
 from bs4 import BeautifulSoup
 from markdownify import markdownify as md 
-import requests 
+
+
+from langchain.text_splitter import RecursiveCharacterTextSplitter, CharacterTextSplitter
+from langchain.text_splitter import Language
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
+from config import cross_encoder
 
 def parse_url(url: str) -> str:
     """
@@ -23,19 +32,34 @@ def parse_url(url: str) -> str:
     
     return markdown_content
     
-def extract_relevant(text: str, min_tokens_per_chunk: int) -> str:
+def extract_relevant(query: str, text: str, min_per_chunk: int = 256, max_document_length: int=1500) -> str:
     """
     Extracts relevant information from the text using 8-layered BERT
     
+    :param query (str): The query to search for in the text.
     :param text (str): The text to extract information from.
+    :param min_per_chunk (int): The minimum number of characters per chunk.
+    :param max_document_length (int): The maximum length of the document.
+    
     :return str: The extracted information.
     """
-
-
     
-# Example usage
-if __name__ == "__main__":
-    url = f"https://ru.wikipedia.org/wiki/%D0%98%D1%81%D0%BA%D1%83%D1%81%D1%81%D1%82%D0%B2%D0%B5%D0%BD%D0%BD%D1%8B%D0%B9_%D0%B8%D0%BD%D1%82%D0%B5%D0%BB%D0%BB%D0%B5%D0%BA%D1%82"
-    print(parse_url(url))
+    splitter = RecursiveCharacterTextSplitter.from_language(
+    language=Language.MARKDOWN, 
+    chunk_size=min_per_chunk,
+    chunk_overlap=min_per_chunk//2
+    )
     
+    chunks = splitter.split_text(text)
     
+    pairs = [(query, chunk) for chunk in chunks]
+    scores = cross_encoder.predict(pairs)
+    ranked = sorted(zip(scores, chunks), key=lambda x: x[0], reverse=True)
+    relevant_chunks = []
+    length = 0
+    for score, chunk in ranked:
+        if length + len(chunk) > max_document_length:
+            break
+        relevant_chunks.append(chunk)
+        length += len(chunk)
+    return "\n\n".join(relevant_chunks)
