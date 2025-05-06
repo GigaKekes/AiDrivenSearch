@@ -37,7 +37,7 @@ class YandexSearch(SearchEngine):
     def build_url(self, query: str, **kwargs) -> tuple[str, dict]:
         
         num_results = kwargs.get("num_results", DEFAULT_NUM_RESULTS)
-        groupby_param = f"attr=d.mode=flat.groups-on-page={num_results}.docs-in-group=1"
+        groupby_param = f"attr=d.mode=flat.groups-on-page={num_results}"
         
         base_url = 'https://yandex.ru/search/xml'
         params = {
