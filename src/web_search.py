@@ -69,8 +69,6 @@ class YandexSearch(SearchEngine):
 
                 results.append({
                     "url": url,
-                    "domain": domain,
-                    "extended_text": extended_text
                 })
 
         return results
@@ -107,8 +105,6 @@ class GoogleSearch(SearchEngine):
 
             results.append({
                 "url": url,
-                "domain": domain,
-                "extended_text": extended_text
             })
 
         return results
@@ -134,7 +130,8 @@ def load_google_config(path="api_key_google.yaml"):
         config = yaml.safe_load(f)
     return config["cse_id"], config["secret"]
 
-
+cse, api_key_google = load_google_config()
+folder_id, api_key_yandex = load_yandex_config()
 
 def parallel_search(searchers, query, num_results):
     results = {}
@@ -153,54 +150,24 @@ def parallel_search(searchers, query, num_results):
 
     return results
 
+
+def parallel_search_yandex_google(query : str, num_results : int = 5, unbox_unique : bool = True) -> list[dict[str]] | dict[list[dict[str]]] | None:
+    google_engine = GoogleSearch(api_key=api_key_google, cse_id=cse)
+    yandex_engine = YandexSearch(api_key=api_key_yandex, folder_id=folder_id)
+    
+    searchers = {
+        "Google": WebSearcher(google_engine),
+        "Yandex": WebSearcher(yandex_engine)
+    }
+    
+    results = parallel_search(searchers, query, num_results=num_results)
+    if unbox_unique:
+        unique_urls = {r["url"] for res in results.values() if isinstance(res, list) for r in res if "url" in r}
+        return list(unique_urls) 
+    return results
+    
+
 if __name__ == "__main__":
-    mode = int(input())
-    
-    
-    if mode == 0:
-        cse, api_key_google = load_google_config()
-        folder_id, api_key_yandex = load_yandex_config()
-        
-        google_engine = GoogleSearch(api_key=api_key_google, cse_id=cse)
-        yandex_engine = YandexSearch(api_key=api_key_yandex, folder_id=folder_id)
-        
-        searcher_google = WebSearcher(google_engine)
-        searcher_yandex = WebSearcher(yandex_engine)
-        
-        start = time.time()
-        print("Google Search Results:")
-        results = searcher_google.search("искусственный интеллект", num_results=10)
-        for r in results:
-            print(r)
-
-        print("\nYandex Search Results:")
-        results = searcher_yandex.search("искусственный интеллект", num_results=10)
-        for r in results:
-            print(r)
-        end = time.time()
-        print(f"Время выполнения: {end - start:.2f} секунд")
-    
-    else:
-        cse, api_key_google = load_google_config()
-        folder_id, api_key_yandex = load_yandex_config()
-
-        google_engine = GoogleSearch(api_key=api_key_google, cse_id=cse)
-        yandex_engine = YandexSearch(api_key=api_key_yandex, folder_id=folder_id)
-
-        searchers = {
-            "Google": WebSearcher(google_engine),
-            "Yandex": WebSearcher(yandex_engine)
-        }
-
-        start = time.time()
-        results = parallel_search(searchers, "искусственный интеллект", num_results=10)
-
-        for engine, res in results.items():
-            print(f"\n{engine} Search Results:")
-            if isinstance(res, str):
-                print(res)
-            else:
-                for r in res:
-                    print(r)
-        end = time.time()
-        print(f"Время выполнения: {end - start:.2f} секунд")
+    query = "что такое искусственный интеллект"
+    results = parallel_search_yandex_google(query, num_results=5)
+    print(results)

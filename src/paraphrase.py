@@ -1,6 +1,6 @@
 from langchain.prompts import ChatPromptTemplate, FewShotChatMessagePromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 from langchain.chains import LLMChain
-from config import llm
+from models import llm
 import re
 import enum
 
@@ -122,12 +122,15 @@ def paraphrase_query(query : str, mode : ParaphaseMode = ParaphaseMode.SIMPLIFY)
 
 Требования:
 - Сохраняй исходный смысл запроса.
+- Напиши только 1 вариант перефразировки.
 - При коротких или неясных запросах — обязательно дополни их для лучшего понимания сути.
 - Следи, чтобы дополнения не искажали исходный смысл.
 - Стиль формулировок должен оставаться естественным и подходящим для поиска в интернете.
 
 Формат:
 - Пронумерованный список.
+- Каждый вариант — отдельной строкой.
+- Перефразировка должна быть в формате: "1. [перефразированный запрос]"
 """
 )
     
